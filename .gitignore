@@ -1,0 +1,10 @@
+# Anything we compile
+*.whl
+*.pyd
+build/
+dist/
+*.egg-info/
+
+# venv related things
+.venv/
+__pycache__/
