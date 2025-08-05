@@ -70,7 +70,7 @@ def write_multistrings(hproc, strings: list[str], allocated_addrs: list[int]) ->
     return final_addr
 
 
-class pyRunner():
+class pyRunner:
     hproc: int
 
     def __init__(self, pid: int):
@@ -111,31 +111,41 @@ class pyRunner():
             kernel32.CloseHandle(self.hproc)
 
     def run_files(self, filepaths: list[str]):
-        """ Run the specified files within the remote process. """
+        """Run the specified files within the remote process."""
         ran_string = -1
         if len(filepaths) == 1:
             # Do the simpler method of just writing the one string
-            if (addr := write_to_mem(self.hproc, filepaths[0].encode())):
+            if addr := write_to_mem(self.hproc, filepaths[0].encode()):
                 self.allocated_addrs.append(addr)
-                ran_string = run_in_thread(self.hproc, self.pystring_dll.run_file, addr, True)
+                ran_string = run_in_thread(
+                    self.hproc, self.pystring_dll.run_file, addr, True
+                )
         else:
             code_addr = write_multistrings(self.hproc, filepaths, self.allocated_addrs)
-            ran_string = run_in_thread(self.hproc, self.pystring_dll.run_multifile, code_addr, True)
+            ran_string = run_in_thread(
+                self.hproc, self.pystring_dll.run_multifile, code_addr, True
+            )
         self.cleanup()
         if ran_string == 0:
             # In this case, no error. Just return.
             return
         elif ran_string > 0:
-            raise ValueError(f"There was an error running the file {filepaths[ran_string - 1]}")
+            raise ValueError(
+                f"There was an error running the file {filepaths[ran_string - 1]}"
+            )
 
     def run_strings(self, strings: list[str]):
-        """ Run the provided strings within the remote process. """
+        """Run the provided strings within the remote process."""
         if len(strings) == 1:
-            if (addr := write_to_mem(self.hproc, strings[0].encode())):
+            if addr := write_to_mem(self.hproc, strings[0].encode()):
                 self.allocated_addrs.append(addr)
-                ran_string = run_in_thread(self.hproc, self.pystring_dll.run_string, addr, True)
+                ran_string = run_in_thread(
+                    self.hproc, self.pystring_dll.run_string, addr, True
+                )
         else:
             code_addr = write_multistrings(self.hproc, strings, self.allocated_addrs)
-            ran_string = run_in_thread(self.hproc, self.pystring_dll.run_multistring, code_addr, True)
+            ran_string = run_in_thread(
+                self.hproc, self.pystring_dll.run_multistring, code_addr, True
+            )
             print(f"String ran successfully? {ran_string == 0}")
         self.cleanup()

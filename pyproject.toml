@@ -13,6 +13,13 @@ maintainers = [
 ]
 version = "0.1"
 
+[dependency-groups]
+dev = [
+  "pytest",
+  "ruff",
+  "twine"
+]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
