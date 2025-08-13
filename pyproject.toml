@@ -11,7 +11,10 @@ authors = [
 maintainers = [
   {name = "monkeyman192"}
 ]
-version = "0.1"
+dependencies = [
+  "pymem"
+]
+version = "0.2.dev1"
 
 [dependency-groups]
 dev = [
@@ -26,5 +29,15 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 ext-modules = [
-  {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_multifile", "run_string", "run_multistring"]}
+  {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_string", "run_data"]}
 ]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+preview = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"

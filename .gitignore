@@ -8,3 +8,6 @@ dist/
 # venv related things
 .venv/
 __pycache__/
+
+# other
+.vscode/
