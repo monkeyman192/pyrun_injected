@@ -14,7 +14,7 @@ maintainers = [
 dependencies = [
   "pymem"
 ]
-version = "0.2"
+version = "0.2.0"
 
 [dependency-groups]
 dev = [
