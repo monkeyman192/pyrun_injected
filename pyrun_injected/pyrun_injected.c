@@ -23,14 +23,11 @@ typedef struct {
 
 __declspec(dllexport) int run_file(const char* filename) {
     // Run a single file within python.
-    FILE* outf;
     FILE* fp;
     errno_t err;
     PyConfig config;
     PyGILState_STATE gstate;
     int ret = 0;
-
-    fopen_s(&outf, "debug.log", "w");
 
     // Configure python.
     PyConfig_InitPythonConfig(&config);
@@ -39,7 +36,6 @@ __declspec(dllexport) int run_file(const char* filename) {
 
     err = fopen_s(&fp, filename, "rb");
     if (err == 0) {
-        fprintf(outf, "running a file...\n");
         gstate = PyGILState_Ensure();
         // Run the file with python.
         ret = PyRun_SimpleFile(fp, filename);
@@ -47,11 +43,8 @@ __declspec(dllexport) int run_file(const char* filename) {
 
         fclose(fp);
     } else {
-        fprintf(outf, "couldn't find the file?\n");
         ret = 1;
     }
-
-    fclose(outf);
 
     if (Py_FinalizeEx() < 0) {
         exit(120);
@@ -62,11 +55,8 @@ __declspec(dllexport) int run_file(const char* filename) {
 
 __declspec(dllexport) int run_string(const char* string) {
     // Run a single string within python.
-    FILE* outf;
     PyConfig config;
     PyGILState_STATE gstate;
-
-    fopen_s(&outf, "debug.log", "w");
 
     // Configure python.
     PyConfig_InitPythonConfig(&config);
@@ -75,13 +65,9 @@ __declspec(dllexport) int run_string(const char* string) {
 
     gstate = PyGILState_Ensure();
     // Run the string with python.
-    fprintf(outf, "running a string\n");
     int res = PyRun_SimpleString(string);
-    fprintf(outf, "result: %d\n", res);
 
     PyGILState_Release(gstate);
-
-    fclose(outf);
 
     if (Py_FinalizeEx() < 0) {
         exit(120);
