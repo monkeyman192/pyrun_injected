@@ -14,23 +14,30 @@ maintainers = [
 dependencies = [
   "pymem"
 ]
-version = "0.2.0"
+dynamic = ["version"]
 
 [dependency-groups]
 dev = [
   "pytest",
   "ruff",
-  "twine"
+  "twine",
+  "setuptools_scm"
 ]
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=64", "wheel", "setuptools-scm>=8", "setuptools_scm_git_semver"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 ext-modules = [
   {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_string", "run_data"]}
 ]
+
+[tool.setuptools.package-dir]
+pyrun_injected = "pyrun_injected"
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
 
 [tool.ruff]
 line-length = 110
