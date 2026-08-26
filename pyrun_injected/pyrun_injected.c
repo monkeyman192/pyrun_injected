@@ -125,10 +125,10 @@ static void extract_syntax_error_info(PyObject *pvalue, RunData *data, uint32_t 
     data->error->syntax_error_data->offset = (int32_t)offset;
     data->error->syntax_error_data->end_offset = (int32_t)end_offset;
 
-    Py_DECREF(msg_attr);
-    Py_DECREF(lineno_attr);
-    Py_DECREF(offset_attr);
-    Py_DECREF(text_attr);
+    Py_XDECREF(msg_attr);
+    Py_XDECREF(lineno_attr);
+    Py_XDECREF(offset_attr);
+    Py_XDECREF(text_attr);
 }
 
 
@@ -167,13 +167,13 @@ uint8_t handle_exception(PyObject *exec_result, RunData *data, uint32_t idx) {
                             if (err_msg != NULL) {
                                 set_error_msg(data, err_msg, idx);
                             }
-                            Py_DECREF(err_obj);
+                            Py_XDECREF(err_obj);
                         }
-                        Py_DECREF(sep);
+                        Py_XDECREF(sep);
                     }
-                    Py_DECREF(list);
+                    Py_XDECREF(list);
                 }
-                Py_DECREF(mod);
+                Py_XDECREF(mod);
             } else {
                 PyErr_Clear();
             }
