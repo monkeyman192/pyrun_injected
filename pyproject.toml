@@ -2,7 +2,7 @@
 name = "pyrun_injected"
 description = "python injector and script runner"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9, <4"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -30,7 +30,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 ext-modules = [
-  {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_string", "run_data"]}
+  {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_string", "run_data", "free_resource"]}
 ]
 
 [tool.setuptools.package-dir]
@@ -41,6 +41,9 @@ local_scheme = "no-local-version"
 
 [tool.ruff]
 line-length = 110
+exclude = [
+  "tests/files/file_04.py",  # This is intentionally invalid python
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
@@ -48,3 +51,6 @@ preview = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[tool.pytest.ini_options]
+addopts = "-p no:faulthandler"
