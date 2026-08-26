@@ -3,8 +3,9 @@ import ctypes.wintypes
 import os.path as op
 import platform
 import sys
+from datetime import datetime
 
-import run_01
+import examples.file_01 as file_01
 
 cwd = op.dirname(__file__)
 
@@ -21,5 +22,6 @@ bytes_copied = kernel32.GetModuleFileNameW(sys.dllhandle, buffer, ctypes.wintype
 
 with open(op.join(cwd, f"output{platform.python_version()}.txt"), "w") as f:
     f.write(f"Called from {buffer.value}\n")
-    f.write(f"run_01.CONSTANT: {str(run_01.CONSTANT)}")
+    f.write(f"Current time: {datetime.now().strftime('%Y/%m/%d %H:%M:%S')}\n")
+    f.write(f"run_01.CONSTANT: {str(file_01.CONSTANT)}")
     f.write("\n")

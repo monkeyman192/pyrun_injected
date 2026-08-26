@@ -4,9 +4,20 @@
 #include <traceback.h>
 
 typedef struct {
-    char* error_msg;         // The actual error message we get from the traceback.
-    size_t msg_length;     // The length of the error message in bytes.
-    uint32_t bad_string_idx; // The index of the string that had the issue.
+    char *error_msg;            // The SyntaxError message
+    size_t msg_length;          // The length of the SyntaxError message in bytes.
+    int32_t lineno;             // The line number.
+    int32_t end_lineno;         // The end line number.
+    int32_t offset;             // The offset in the line.
+    int32_t end_offset;         // The end offset in the line.
+} SyntaxErrorData;
+
+typedef struct {
+    char* error_msg;                        // The actual error message we get from the traceback.
+    size_t msg_length;                      // The length of the error message in bytes.
+    uint32_t bad_string_idx;                // The index of the string that had the issue.
+    SyntaxErrorData* syntax_error_data;     // SyntaxError data. Only set if the exception was a syntax error.
+
 } ErrorData;
 
 typedef struct {
@@ -21,9 +32,9 @@ typedef struct {
 } RunData;
 
 
-__declspec(dllexport) int run_file(const char* filename) {
+__declspec(dllexport) int run_file(const char *filename) {
     // Run a single file within python.
-    FILE* fp;
+    FILE *fp;
     errno_t err;
     PyConfig config;
     PyGILState_STATE gstate;
@@ -53,7 +64,7 @@ __declspec(dllexport) int run_file(const char* filename) {
 }
 
 
-__declspec(dllexport) int run_string(const char* string) {
+__declspec(dllexport) int run_string(const char *string) {
     // Run a single string within python.
     PyConfig config;
     PyGILState_STATE gstate;
@@ -76,56 +87,109 @@ __declspec(dllexport) int run_string(const char* string) {
     return res;
 }
 
-uint8_t handle_exception(PyObject* exec_result, RunData* data, uint32_t idx) {
-    const char* err_msg;
+static void set_error_msg(RunData *data, const char *msg, uint32_t idx) {
+    // Set the error message details.
+    data->error->error_msg = _strdup(msg);
+    data->error->msg_length = strlen(msg);
+    data->error->bad_string_idx = idx;
+}
+
+
+static void extract_syntax_error_info(PyObject *pvalue, RunData *data, uint32_t idx) {
+    // Handle syntax errors.
+    // First, extract some attributes from the object.
+    PyObject *msg_attr = PyObject_GetAttrString(pvalue, "msg");
+    PyObject *lineno_attr = PyObject_GetAttrString(pvalue, "lineno");
+    PyObject *end_lineno_attr = PyObject_GetAttrString(pvalue, "end_lineno");
+    PyObject *offset_attr = PyObject_GetAttrString(pvalue, "offset");
+    PyObject *end_offset_attr = PyObject_GetAttrString(pvalue, "end_offset");
+    PyObject *text_attr = PyObject_GetAttrString(pvalue, "text");
+
+    // Then coerce them into the right types if they are defined.
+    const char *msg = (msg_attr && msg_attr != Py_None) ? PyUnicode_AsUTF8(msg_attr) : NULL;
+    long lineno = (lineno_attr && lineno_attr != Py_None) ? PyLong_AsLong(lineno_attr) : -1;
+    long end_lineno = (end_lineno_attr && end_lineno_attr != Py_None) ? PyLong_AsLong(end_lineno_attr) : -1;
+    long offset = (offset_attr && offset_attr != Py_None) ? PyLong_AsLong(offset_attr) : -1;
+    long end_offset = (end_offset_attr && end_offset_attr != Py_None) ? PyLong_AsLong(end_offset_attr) : -1;
+    const char *text = (text_attr && text_attr != Py_None) ? PyUnicode_AsUTF8(text_attr) : NULL;
+
+    if (msg != NULL) {
+        set_error_msg(data, msg, idx);
+    }
+    if (text != NULL) {
+        data->error->syntax_error_data->error_msg = _strdup(text);
+        data->error->syntax_error_data->msg_length = strlen(text);
+    }
+    data->error->syntax_error_data->lineno = (int32_t)lineno;
+    data->error->syntax_error_data->end_lineno = (int32_t)end_lineno;
+    data->error->syntax_error_data->offset = (int32_t)offset;
+    data->error->syntax_error_data->end_offset = (int32_t)end_offset;
+
+    Py_XDECREF(msg_attr);
+    Py_XDECREF(lineno_attr);
+    Py_XDECREF(offset_attr);
+    Py_XDECREF(text_attr);
+}
+
+
+uint8_t handle_exception(PyObject *exec_result, RunData *data, uint32_t idx) {
     // Handle the exception raised by executing python code.
     if (exec_result != NULL) {
         return 0;
     }
+
     PyObject *ptype, *pvalue, *ptraceback;
     PyErr_Fetch(&ptype, &pvalue, &ptraceback);
-    if (ptype) {
+
+    if (ptype != NULL) {
         PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+
         if (ptraceback != NULL) {
             PyException_SetTraceback(pvalue, ptraceback);
         }
 
-        // Extract traceback info
-        PyTracebackObject* ptracebackObj = (PyTracebackObject*)ptraceback;
-        if (ptracebackObj) {
-            PyObject *mod, *list, *string;
-            PyObject *err_obj;
+        // If the exception was a syntax error, we need to handle it differently:
+        if (PyErr_GivenExceptionMatches(ptype, PyExc_SyntaxError)) {
+            extract_syntax_error_info(pvalue, data, idx);
+        } else {
+            // Extract traceback info.
             // Use the python `traceback` module to actually get the exception stack trace that ocurred.
-            mod  = PyImport_ImportModule("traceback");
-            list = PyObject_CallMethod(mod, "format_exception", "OOO", ptype, pvalue, ptraceback);
-            if (list) {
-                // If we have one, format it and then assign all the info to the error struct.
-                string = PyUnicode_FromString("\n");
-                err_obj = PyUnicode_Join(string, list);
-                err_msg = PyUnicode_AsUTF8(err_obj);
-                data->error->error_msg = (char*)err_msg;
-                data->error->msg_length = strlen(err_msg);
-                data->error->bad_string_idx = idx;
+            PyObject *mod  = PyImport_ImportModule("traceback");
+            if (mod != NULL) {
+                PyObject *list = PyObject_CallMethod(mod, "format_exception", "OOO", ptype, pvalue, ptraceback);
+                if (list != NULL) {
+                    // If we have one, format it and then assign all the info to the error struct.
+                    PyObject *sep = PyUnicode_FromString("\n");
+                    if (sep != NULL) {
+                        PyObject* err_obj = PyUnicode_Join(sep, list);
+                        if (err_obj != NULL) {
+                            const char* err_msg = PyUnicode_AsUTF8(err_obj);
+                            if (err_msg != NULL) {
+                                set_error_msg(data, err_msg, idx);
+                            }
+                            Py_XDECREF(err_obj);
+                        }
+                        Py_XDECREF(sep);
+                    }
+                    Py_XDECREF(list);
+                }
+                Py_XDECREF(mod);
+            } else {
+                PyErr_Clear();
             }
-            Py_XDECREF(list);
-            Py_XDECREF(mod);
-            Py_XDECREF(string);
         }
-        Py_XDECREF(ptracebackObj);
     }
     PyErr_Restore(ptype, pvalue, ptraceback);
-    Py_XDECREF(ptype);
-    Py_XDECREF(pvalue);
-    Py_XDECREF(ptraceback);
     return 1;
 }
 
-__declspec(dllexport) int run_data(RunData* data) {
+__declspec(dllexport) int run_data(RunData *data) {
     // Run multiple strings sequentially within python.
+    // *This* is the function you would want to call as it handles any exceptions that occur.
     uint32_t count = data->count;
     PyConfig config;
     PyGILState_STATE gstate;
-    FILE* fp;
+    FILE *fp;
     errno_t err;
     int retval = 0;
 
@@ -139,26 +203,31 @@ __declspec(dllexport) int run_data(RunData* data) {
     // Set up some state dictionaries for when the code runs.
     PyObject *main_module = PyImport_AddModule("__main__");
     PyObject *global_dict = PyModule_GetDict(main_module);
-    PyObject *local_dict;
+    PyObject *local_dict = NULL;
 
     // Run each string.
-    for (uint32_t i = 0; i < count; i++) {
-        StringData sd = data->strings[i];
-        const char* py_data = sd.string_value;
+    for (uint32_t idx = 0; idx < count; idx++) {
+        StringData sd = data->strings[idx];
+        const char *py_data = sd.string_value;
 
         // New local dict for each file/string being run.
         local_dict = PyModule_GetDict(main_module);
+
+        // Flag to check whether we want to exit early (ie. end the loop and stop processing strings/files).
+        uint8_t exit_early = 0;
 
         if (sd.is_file) {
             err = fopen_s(&fp, py_data, "rb");
             if (err == 0) {
                 // Set the "__file__" attribute to the locals so that it knows itself.
                 PyObject *filename_obj = PyUnicode_DecodeFSDefault(py_data);
-                PyDict_SetItemString(local_dict, "__file__", filename_obj);
-                PyObject* res = PyRun_File(fp, py_data, Py_file_input, global_dict, local_dict);
-                uint8_t exit_early = handle_exception(res, data, i);
+                if (filename_obj != NULL) {
+                    PyDict_SetItemString(local_dict, "__file__", filename_obj);
+                    PyObject* res = PyRun_FileEx(fp, py_data, Py_file_input, global_dict, local_dict, 1);
+                    exit_early = handle_exception(res, data, idx);
+                    Py_XDECREF(res);
+                }
                 Py_XDECREF(filename_obj);
-                Py_XDECREF(res);
                 fclose(fp);
                 if (exit_early) {
                     retval = 1;
@@ -167,15 +236,13 @@ __declspec(dllexport) int run_data(RunData* data) {
             } else {
                 // Can't find the file.
                 // We'll set the error message and finish.
-                data->error->error_msg = (char*)"File doesn't exist or cannot be found";
-                data->error->msg_length = strlen(data->error->error_msg);
-                data->error->bad_string_idx = i;
+                set_error_msg(data, "File doesn't exist or cannot be found", idx);
                 retval = 1;
                 break;
             }
         } else {
-            PyObject* res = PyRun_String(py_data, Py_file_input, global_dict, local_dict);
-            uint8_t exit_early = handle_exception(res, data, i);
+            PyObject *res = PyRun_String(py_data, Py_file_input, global_dict, local_dict);
+            exit_early = handle_exception(res, data, idx);
             Py_XDECREF(res);
             if (exit_early) {
                 retval = 1;
@@ -183,18 +250,20 @@ __declspec(dllexport) int run_data(RunData* data) {
             }
         }
     }
-
-    Py_XDECREF(main_module);
-    Py_XDECREF(global_dict);
     Py_XDECREF(local_dict);
-
     PyGILState_Release(gstate);
 
     if (Py_FinalizeEx() < 0) {
         exit(120);
     }
-
     return retval;
+}
+
+
+__declspec(dllexport) int free_resource(void *obj) {
+    // Free some resource which was allocated by this c code.
+    free(obj);
+    return 0;
 }
 
 
