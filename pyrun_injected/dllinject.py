@@ -181,12 +181,17 @@ class pyRunner:
 
         self._inject_python_dll()
         self._inject_runpy_injected_dll()
+        self.set_python_home(self.python_home)
 
     def _inject_python_dll(self):
         # Inject python dll into the remote process.
         buffer = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
         kernel32.GetModuleFileNameW(sys.dllhandle, buffer, wintypes.MAX_PATH)
         py_dllpath = buffer.value
+        # CPython cannot reliably detect its own prefix inside the target process, so
+        # remember it here: this is the directory of the interpreter dll we are about
+        # to inject, which is exactly what PyConfig.home has to be.
+        self.python_home = op.dirname(py_dllpath)
         self.python_lib_h = pymem.process.inject_dll_from_path(self.pm.process_handle, py_dllpath)
         self.py_handle = pymem.ressources.kernel32.GetModuleHandleW(op.basename(py_dllpath))
 
@@ -203,6 +208,24 @@ class pyRunner:
                 pymem.ressources.kernel32.VirtualFreeEx(self.hproc, addr, 0, MEM_RELEASE)
         if self.hproc is not None:
             pymem.ressources.kernel32.CloseHandle(self.hproc)
+
+    def set_python_home(self, home: str) -> None:
+        """Set the prefix (``PyConfig.home``) the injected interpreter will use.
+
+        ``PyConfig_InitPythonConfig`` leaves ``home`` as NULL, which makes CPython
+        auto-detect its prefix. Inside an injected process that detection can fail, so
+        the value is supplied explicitly instead.
+
+        Parameters
+        ----------
+        home
+            The Python installation prefix inside the target process.
+        """
+        addr = write_to_mem(self.hproc, home.encode("utf-8"))
+        self.allocated_addrs.append(addr)
+        set_home_addr = func_addr(b"set_python_home", self.pyrun_handle, self.pyrun_lib_h)
+        if run_in_thread(self.hproc, set_home_addr, addr, True) != 0:
+            logger.error(f"Unable to set the python home to {home!r}")
 
     def run_data(
         self,

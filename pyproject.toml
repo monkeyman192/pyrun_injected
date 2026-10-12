@@ -30,7 +30,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 ext-modules = [
-  {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_string", "run_data", "free_resource"]}
+  {name = "pyrun_injected.dll", sources = ["pyrun_injected/pyrun_injected.c"], export-symbols = ["run_file", "run_string", "run_data", "free_resource", "set_python_home"]}
 ]
 
 [tool.setuptools.package-dir]
