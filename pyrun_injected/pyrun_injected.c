@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <Python.h>
 #include <traceback.h>
+#include <wchar.h>
+#include <windows.h>
 
 typedef struct {
     char *error_msg;            // The SyntaxError message
@@ -31,19 +33,87 @@ typedef struct {
     ErrorData* error;    // Error data (if an error occurs).
 } RunData;
 
+// The prefix CPython must use inside the target process. PyConfig_InitPythonConfig
+// leaves `home` as NULL, which asks CPython to auto-detect its prefix. Inside an
+// injected process that detection can fail and the interpreter then cannot even
+// find `encodings`. The host knows which python3XX.dll it injected, so it supplies
+// the prefix up front via set_python_home().
+static wchar_t g_python_home[MAX_PATH] = {0};
+
+__declspec(dllexport) int set_python_home(const char *home) {
+    // Set the directory used as CPython's prefix (PyConfig.home) inside the target process.
+    // The value is copied, so the caller may free `home` as soon as this returns.
+    if (home == NULL || home[0] == '\0') {
+        return 1;
+    }
+    if (MultiByteToWideChar(CP_UTF8, 0, home, -1, g_python_home, MAX_PATH) == 0) {
+        g_python_home[0] = L'\0';
+        return 1;
+    }
+    return 0;
+}
+
+static int set_config_home(PyConfig *config) {
+    // Point config->home at the prefix of the interpreter this module is bound to.
+    // Returns non-zero on success.
+    wchar_t dll_name[32];
+    wchar_t path[MAX_PATH];
+    wchar_t *slash;
+    HMODULE hmod;
+
+    if (g_python_home[0]) {
+        // An explicit value from the host takes precedence.
+        return !PyStatus_Exception(PyConfig_SetString(config, &config->home, g_python_home));
+    }
+
+    // Otherwise fall back to the directory of the python3XX.dll we are linked against.
+    // It cannot be derived from this module's own path: the .pyd is installed into
+    // site-packages, while the interpreter's prefix is where python3XX.dll lives.
+    // Not finding it is not fatal -- home stays NULL and we keep the previous behaviour.
+#ifdef Py_DEBUG
+    swprintf(dll_name, 32, L"python%d%d_d.dll", PY_MAJOR_VERSION, PY_MINOR_VERSION);
+#else
+    swprintf(dll_name, 32, L"python%d%d.dll", PY_MAJOR_VERSION, PY_MINOR_VERSION);
+#endif
+    hmod = GetModuleHandleW(dll_name);
+    if (hmod == NULL || GetModuleFileNameW(hmod, path, MAX_PATH) == 0) {
+        return 0;
+    }
+    slash = wcsrchr(path, L'\\');
+    if (slash == NULL) {
+        return 0;
+    }
+    *slash = L'\0';
+    return !PyStatus_Exception(PyConfig_SetString(config, &config->home, path));
+}
 
 __declspec(dllexport) int run_file(const char *filename) {
     // Run a single file within python.
     FILE *fp;
     errno_t err;
     PyConfig config;
+    PyStatus status;
     PyGILState_STATE gstate;
     int ret = 0;
 
     // Configure python.
     PyConfig_InitPythonConfig(&config);
-    PyConfig_SetBytesString(&config, &config.program_name, "run_file");
-    Py_InitializeFromConfig(&config);
+
+    status = PyConfig_SetBytesString(&config, &config.program_name, "run_file");
+    if (PyStatus_Exception(status)) {
+        PyConfig_Clear(&config);
+        return 1;
+    }
+
+    // CPython cannot reliably detect its prefix from inside the target process.
+    set_config_home(&config);
+    config.install_signal_handlers = 0;
+
+    status = Py_InitializeFromConfig(&config);
+    PyConfig_Clear(&config);
+    if (PyStatus_Exception(status)) {
+        return 1;
+    }
 
     err = fopen_s(&fp, filename, "rb");
     if (err == 0) {
@@ -67,16 +137,32 @@ __declspec(dllexport) int run_file(const char *filename) {
 __declspec(dllexport) int run_string(const char *string) {
     // Run a single string within python.
     PyConfig config;
+    PyStatus status;
     PyGILState_STATE gstate;
+    int res = 0;
 
     // Configure python.
     PyConfig_InitPythonConfig(&config);
-    PyConfig_SetBytesString(&config, &config.program_name, "run_string");
-    Py_InitializeFromConfig(&config);
+
+    status = PyConfig_SetBytesString(&config, &config.program_name, "run_string");
+    if (PyStatus_Exception(status)) {
+        PyConfig_Clear(&config);
+        return 1;
+    }
+
+    // CPython cannot reliably detect its prefix from inside the target process.
+    set_config_home(&config);
+    config.install_signal_handlers = 0;
+
+    status = Py_InitializeFromConfig(&config);
+    PyConfig_Clear(&config);
+    if (PyStatus_Exception(status)) {
+        return 1;
+    }
 
     gstate = PyGILState_Ensure();
     // Run the string with python.
-    int res = PyRun_SimpleString(string);
+    res = PyRun_SimpleString(string);
 
     PyGILState_Release(gstate);
 
@@ -188,6 +274,7 @@ __declspec(dllexport) int run_data(RunData *data) {
     // *This* is the function you would want to call as it handles any exceptions that occur.
     uint32_t count = data->count;
     PyConfig config;
+    PyStatus status;
     PyGILState_STATE gstate;
     FILE *fp;
     errno_t err;
@@ -195,8 +282,24 @@ __declspec(dllexport) int run_data(RunData *data) {
 
     // Configure python.
     PyConfig_InitPythonConfig(&config);
-    PyConfig_SetBytesString(&config, &config.program_name, "run_data");
-    Py_InitializeFromConfig(&config);
+
+    status = PyConfig_SetBytesString(&config, &config.program_name, "run_data");
+    if (PyStatus_Exception(status)) {
+        PyConfig_Clear(&config);
+        set_error_msg(data, status.err_msg ? status.err_msg : "Failed to configure the interpreter", 0);
+        return 1;
+    }
+
+    // CPython cannot reliably detect its prefix from inside the target process.
+    set_config_home(&config);
+    config.install_signal_handlers = 0;
+
+    status = Py_InitializeFromConfig(&config);
+    PyConfig_Clear(&config);
+    if (PyStatus_Exception(status)) {
+        set_error_msg(data, status.err_msg ? status.err_msg : "Py_InitializeFromConfig failed", 0);
+        return 1;
+    }
 
     gstate = PyGILState_Ensure();
 

@@ -16,7 +16,7 @@ To this end `pyrun-injected` uses `PyRun_String` and `PyRun_File` under the hood
 
 ## c API
 
-`pyrun-injected` provides 3 functions which are useful for calling:
+`pyrun-injected` provides 4 functions which are useful for calling:
 
 ### `int pyrun_injected.dll.run_file(const char* filename)`:
 
@@ -57,6 +57,16 @@ typedef struct {
 
 We pass in a struct like this rather than having multiple arguments because the Windows API only allows us to pass in one argument.
 
+### `int pyrun_injected.dll.set_python_home(const char* home)`:
+
+Sets the directory used as CPython's prefix (`PyConfig.home`) inside the target process.
+The value is copied, so it may be freed by the caller as soon as this returns.
+
+`PyConfig_InitPythonConfig` leaves `home` as NULL, which asks CPython to auto-detect its prefix.
+Inside a process that is not the interpreter that detection can fail, so this must be set before
+the first call to `run_data`. When it is not set, the prefix is derived from the directory of the
+injected `python3XX.dll`.
+
 ## python API
 
 The python API provides a single class which simplifies injecting and calling strings and files in python.
@@ -89,6 +99,16 @@ This function allows you to pass in a mix of filepaths and strings to be run in 
 It is strongly recommended that filepaths are provided as absolute paths, unless all are in a specifi directory, in which case that path should be passed in to this function as the `run_in_directory` argument.
 
 Note: It's important that all python code which is to be run which requires any other piece of code be run together. Once the code finalises after running the strings or files any data will not be persisted.
+
+The class also provides one method for telling the injected interpreter where its prefix is:
+
+```py
+def set_python_home(self, home: str) -> None:
+```
+
+This is called automatically on construction, using the directory of the interpreter DLL that gets
+injected. You only need to call it yourself if you want the injected interpreter to use a different
+prefix.
 
 ## Example usage
 
